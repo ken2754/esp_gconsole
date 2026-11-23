@@ -40,9 +40,9 @@
 | :--- | :--- | :--- |
 | `I2S_MCLK` | `GPIO 4` | 256×Fs |
 | `I2S_BCLK` | `GPIO 5` | Bit Clock |
-| `I2S_DOUT` | `GPIO 6` | ESP32-S3 → ES8311 DAC出力 |
+| `I2S_DOUT` | `GPIO 8` | ESP32-S3 → ES8311 DSDIN（DAC出力） |
 | `I2S_LRCK` | `GPIO 7` | Word Select (WS) |
-| `I2S_DIN` | `GPIO 8` | オンボードマイク入力（未使用可） |
+| `I2S_DIN` | `GPIO 6` | ES8311 ASDOUT → ESP32-S3（オンボードマイク入力） |
 | `AMP_EN` | `GPIO 1` | **LOW でアンプ有効** / HIGH でミュート |
 
 ---

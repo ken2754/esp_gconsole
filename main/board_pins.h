@@ -38,9 +38,9 @@ constexpr int PIN_TP_RST = 18;
 // --- Audio (ES8311 I2S + FM8002E Speaker Amp) ---
 constexpr int PIN_I2S_MCLK = 4;
 constexpr int PIN_I2S_BCLK = 5;
-constexpr int PIN_I2S_DOUT = 6;
+constexpr int PIN_I2S_DOUT = 8; // ESP32 DOUT -> ES8311 DSDIN (Speaker DAC)
 constexpr int PIN_I2S_LRCK = 7;
-constexpr int PIN_I2S_DIN  = 8;
+constexpr int PIN_I2S_DIN  = 6; // ES8311 ASDOUT -> ESP32 DIN (Mic ADC)
 constexpr int PIN_AMP_EN   = 1; // Active LOW enables FM8002E speaker amplifier
 
 // --- User Tactile Switches (4-GPIO parallel 6-button + onboard BOOT) ---

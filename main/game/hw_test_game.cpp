@@ -5,10 +5,13 @@
 #include "board_pins.h"
 #include "esp_psram.h"
 #include "hal/audio.hpp"
+#include "hal/ble_hid.hpp"
+#include "hal/save_data.hpp"
 
 namespace {
 
 constexpr uint8_t BRIGHTNESS_LEVELS[] = {30, 70, 100};
+constexpr uint32_t BOOT_EXIT_HOLD_MS = 1000;
 
 struct Rect {
     int16_t x;
@@ -20,19 +23,11 @@ struct Rect {
     }
 };
 
-constexpr Rect RECT_DON    = {18, 128, 134, 68};
-constexpr Rect RECT_KA     = {168, 128, 134, 68};
+constexpr Rect RECT_MENU   = {186, 4, 48, 20};
+constexpr Rect RECT_DON    = {18, 136, 134, 60};
+constexpr Rect RECT_KA     = {168, 136, 134, 60};
 constexpr Rect RECT_BRIGHT = {18, 206, 134, 26};
-constexpr Rect RECT_MODE   = {168, 206, 134, 26};
-
-const char* mode_label(InputMode m) {
-    switch (m) {
-        case InputMode::LR_AB:     return "MODE: LR+AB";
-        case InputMode::DPAD_4WAY: return "MODE: 4WAY";
-        case InputMode::BOTH:      return "MODE: BOTH";
-    }
-    return "MODE: ?";
-}
+constexpr Rect RECT_REPAIR = {168, 206, 134, 26};
 
 void draw_key_box(lgfx::LGFX_Sprite& fb, int16_t x, int16_t y, int16_t w, int16_t h,
                   const char* label, bool active, uint16_t active_color) {
@@ -49,8 +44,21 @@ void draw_key_box(lgfx::LGFX_Sprite& fb, int16_t x, int16_t y, int16_t w, int16_
 } // namespace
 
 void HwTestGame::init() {
+    _wants_exit   = false;
+    _boot_hold_ms = 0;
+    _ripple_ms    = 0;
+    _don_flash_ms = 0;
+    _ka_flash_ms  = 0;
     input_set_mode(InputMode::BOTH);
+    const uint8_t cur_bri = save_data_get().brightness_pct;
+    if (cur_bri <= 40)      _brightness_idx = 0;
+    else if (cur_bri <= 80) _brightness_idx = 1;
+    else                    _brightness_idx = 2;
     display_set_brightness(BRIGHTNESS_LEVELS[_brightness_idx]);
+}
+
+void HwTestGame::on_exit() {
+    audio_bgm_stop();
 }
 
 void HwTestGame::update(uint32_t dt_ms, const InputState& input) {
@@ -59,6 +67,18 @@ void HwTestGame::update(uint32_t dt_ms, const InputState& input) {
     if (_ripple_ms > dt_ms)    _ripple_ms -= dt_ms;    else _ripple_ms = 0;
     if (_don_flash_ms > dt_ms) _don_flash_ms -= dt_ms; else _don_flash_ms = 0;
     if (_ka_flash_ms > dt_ms)  _ka_flash_ms -= dt_ms;  else _ka_flash_ms = 0;
+
+    // Hold BOOT / START for 1 second to return to Launcher
+    if (input.held & BTN_PAUSE) {
+        _boot_hold_ms += dt_ms;
+        if (_boot_hold_ms >= BOOT_EXIT_HOLD_MS) {
+            audio_play_tone(880.0f, 70, Waveform::SQUARE, 0.25f);
+            _wants_exit = true;
+            return;
+        }
+    } else {
+        _boot_hold_ms = 0;
+    }
 
     // FPS counter
     ++_frame_acc;
@@ -69,14 +89,19 @@ void HwTestGame::update(uint32_t dt_ms, const InputState& input) {
         _time_acc_ms = 0;
     }
 
-    // Physical button SFX
-    if (input.pressed & BTN_LEFT)  audio_play_tone(523.25f, 90, Waveform::SQUARE, 0.30f);   // C5
-    if (input.pressed & BTN_RIGHT) audio_play_tone(587.33f, 90, Waveform::SQUARE, 0.30f);   // D5
-    if (input.pressed & (BTN_A | BTN_UP))   audio_play_tone(659.25f, 100, Waveform::SQUARE, 0.30f); // E5
-    if (input.pressed & (BTN_B | BTN_DOWN)) audio_play_tone(783.99f, 100, Waveform::SQUARE, 0.30f); // G5
-    if (input.pressed & BTN_PAUSE) audio_play_tone(1046.50f, 120, Waveform::TRIANGLE, 0.35f); // C6
+    // Button SFX
+    if (input.pressed & BTN_LEFT)   audio_play_tone(523.25f, 70, Waveform::SQUARE, 0.25f);
+    if (input.pressed & BTN_RIGHT)  audio_play_tone(587.33f, 70, Waveform::SQUARE, 0.25f);
+    if (input.pressed & BTN_UP)     audio_play_tone(659.25f, 70, Waveform::SQUARE, 0.25f);
+    if (input.pressed & BTN_DOWN)   audio_play_tone(698.46f, 70, Waveform::SQUARE, 0.25f);
+    if (input.pressed & BTN_A)      audio_play_tone(783.99f, 80, Waveform::SQUARE, 0.28f);
+    if (input.pressed & BTN_B)      audio_play_tone(880.00f, 80, Waveform::SQUARE, 0.28f);
+    if (input.pressed & BTN_X)      audio_play_tone(987.77f, 80, Waveform::SQUARE, 0.28f);
+    if (input.pressed & BTN_Y)      audio_play_tone(1046.5f, 80, Waveform::SQUARE, 0.28f);
+    if (input.pressed & BTN_L)      audio_play_sweep(170.0f, 65.0f, 95, Waveform::TRIANGLE, 0.50f);
+    if (input.pressed & BTN_R)      audio_play_tone(1240.0f, 55, Waveform::SQUARE, 0.25f);
+    if (input.pressed & (BTN_PAUSE | BTN_SELECT)) audio_play_tone(1174.7f, 90, Waveform::TRIANGLE, 0.30f);
 
-    // Capacitive touch interactions
     if (input.touch.down) {
         _last_tx = input.touch.x;
         _last_ty = input.touch.y;
@@ -84,25 +109,24 @@ void HwTestGame::update(uint32_t dt_ms, const InputState& input) {
 
     if (input.touch.just_pressed) {
         _ripple_ms = 220;
-        if (RECT_DON.contains(input.touch.x, input.touch.y)) {
+        if (RECT_MENU.contains(input.touch.x, input.touch.y)) {
+            audio_play_tone(783.99f, 60, Waveform::SQUARE, 0.25f);
+            _wants_exit = true;
+        } else if (RECT_DON.contains(input.touch.x, input.touch.y)) {
             _don_flash_ms = 140;
-            audio_play_tone(130.81f, 95, Waveform::TRIANGLE, 0.55f); // Low drum body
-            audio_play_tone(90.0f, 60, Waveform::SINE, 0.45f);
+            audio_play_sweep(170.0f, 65.0f, 95, Waveform::TRIANGLE, 0.55f);
         } else if (RECT_KA.contains(input.touch.x, input.touch.y)) {
             _ka_flash_ms = 140;
-            audio_play_tone(880.0f, 55, Waveform::NOISE, 0.35f);     // Rim click
+            audio_play_tone(880.0f, 55, Waveform::NOISE, 0.35f);
             audio_play_tone(1174.66f, 60, Waveform::SQUARE, 0.25f);
         } else if (RECT_BRIGHT.contains(input.touch.x, input.touch.y)) {
             _brightness_idx = (_brightness_idx + 1) % 3;
             display_set_brightness(BRIGHTNESS_LEVELS[_brightness_idx]);
+            save_data_set_brightness(BRIGHTNESS_LEVELS[_brightness_idx]);
             audio_play_tone(660.0f, 50, Waveform::SINE, 0.25f);
-        } else if (RECT_MODE.contains(input.touch.x, input.touch.y)) {
-            const InputMode cur = input_get_mode();
-            InputMode next = InputMode::BOTH;
-            if (cur == InputMode::BOTH)           next = InputMode::LR_AB;
-            else if (cur == InputMode::LR_AB)     next = InputMode::DPAD_4WAY;
-            input_set_mode(next);
-            audio_play_tone(880.0f, 50, Waveform::SINE, 0.25f);
+        } else if (RECT_REPAIR.contains(input.touch.x, input.touch.y)) {
+            ble_hid_clear_bonds();
+            audio_play_tone(523.25f, 60, Waveform::TRIANGLE, 0.25f);
         } else {
             audio_play_tone(440.0f, 40, Waveform::SINE, 0.20f);
         }
@@ -110,40 +134,60 @@ void HwTestGame::update(uint32_t dt_ms, const InputState& input) {
 }
 
 void HwTestGame::draw(lgfx::LGFX_Sprite& fb) {
-    fb.fillScreen(0x1082); // Deep slate blue
+    fb.fillScreen(0x1082);
 
     // Header bar
     fb.fillRect(0, 0, SCREEN_WIDTH, 28, 0x18E4);
     fb.setTextSize(1);
     fb.setTextDatum(ML_DATUM);
     fb.setTextColor(TFT_YELLOW);
-    fb.drawString("ESP-GCONSOLE ES3C28P TEST", 8, 14);
+    fb.drawString("ES3C28P + BLE HID TEST", 8, 14);
+
+    draw_key_box(fb, RECT_MENU.x, RECT_MENU.y, RECT_MENU.w, RECT_MENU.h, "MENU", false, TFT_WHITE);
 
     char stats[48];
-    snprintf(stats, sizeof(stats), "%luFPS %luKB",
+    snprintf(stats, sizeof(stats), "%luFPS %luMB",
              static_cast<unsigned long>(_fps),
-             static_cast<unsigned long>(esp_psram_get_size() / 1024));
+             static_cast<unsigned long>(esp_psram_get_size() / (1024 * 1024)));
     fb.setTextDatum(MR_DATUM);
     fb.setTextColor(TFT_CYAN);
     fb.drawString(stats, SCREEN_WIDTH - 8, 14);
 
-    // Physical button status row
-    const bool a_or_up   = (_last_held & (BTN_A | BTN_UP)) != 0;
-    const bool b_or_down = (_last_held & (BTN_B | BTN_DOWN)) != 0;
-    draw_key_box(fb, 18,  40, 62, 36, "LEFT",  (_last_held & BTN_LEFT) != 0,  TFT_GREEN);
-    draw_key_box(fb, 88,  40, 62, 36, "RIGHT", (_last_held & BTN_RIGHT) != 0, TFT_GREEN);
-    draw_key_box(fb, 158, 40, 68, 36, "A / UP", a_or_up,                    TFT_CYAN);
-    draw_key_box(fb, 234, 40, 68, 36, "B / DN", b_or_down,                  TFT_ORANGE);
+    // Row 1: D-Pad + Shoulders
+    draw_key_box(fb, 12,  34, 46, 28, "L",   (_last_held & BTN_LEFT)  != 0, TFT_GREEN);
+    draw_key_box(fb, 62,  34, 46, 28, "U",   (_last_held & BTN_UP)    != 0, TFT_GREEN);
+    draw_key_box(fb, 112, 34, 46, 28, "D",   (_last_held & BTN_DOWN)  != 0, TFT_GREEN);
+    draw_key_box(fb, 162, 34, 46, 28, "R",   (_last_held & BTN_RIGHT) != 0, TFT_GREEN);
+    draw_key_box(fb, 214, 34, 46, 28, "L1",  (_last_held & BTN_L)     != 0, TFT_YELLOW);
+    draw_key_box(fb, 264, 34, 44, 28, "R1",  (_last_held & BTN_R)     != 0, TFT_YELLOW);
 
-    // BOOT button + audio clock status
-    char info[64];
-    snprintf(info, sizeof(info), "BOOT:%s  AUD_CLK:%lums  TP:(%d,%d)",
-             (_last_held & BTN_PAUSE) ? "ON" : "--",
-             static_cast<unsigned long>(audio_get_playback_ms()),
+    // Row 2: Face buttons + Start/Select
+    draw_key_box(fb, 12,  68, 46, 28, "A",   (_last_held & BTN_A)      != 0, TFT_CYAN);
+    draw_key_box(fb, 62,  68, 46, 28, "B",   (_last_held & BTN_B)      != 0, TFT_ORANGE);
+    draw_key_box(fb, 112, 68, 46, 28, "X",   (_last_held & BTN_X)      != 0, TFT_CYAN);
+    draw_key_box(fb, 162, 68, 46, 28, "Y",   (_last_held & BTN_Y)      != 0, TFT_ORANGE);
+    draw_key_box(fb, 214, 68, 46, 28, "SEL", (_last_held & BTN_SELECT) != 0, TFT_MAGENTA);
+    draw_key_box(fb, 264, 68, 44, 28, "ST",  (_last_held & BTN_PAUSE)  != 0, TFT_MAGENTA);
+
+    // BLE HID + Raw HID Usage diagnostic line
+    const BleHidStatus ble = ble_hid_get_status();
+    char info[80];
+    snprintf(info, sizeof(info), "BT:%.14s  KEY:0x%02X  TP:(%d,%d)",
+             ble.connected ? ble.device_name : (ble.scanning ? "SCAN" : "WAIT"),
+             static_cast<unsigned>(ble.last_keycode),
              _last_tx, _last_ty);
     fb.setTextDatum(MC_DATUM);
-    fb.setTextColor(TFT_WHITE);
-    fb.drawString(info, SCREEN_WIDTH / 2, 96);
+    fb.setTextColor(ble.connected ? TFT_GREEN : TFT_WHITE);
+    fb.drawString(info, SCREEN_WIDTH / 2, 108);
+
+    if (_boot_hold_ms > 0) {
+        const int bar_w = static_cast<int>((_boot_hold_ms * 120) / BOOT_EXIT_HOLD_MS);
+        fb.fillRect(100, 120, 120, 6, TFT_DARKGREY);
+        fb.fillRect(100, 120, bar_w > 120 ? 120 : bar_w, 6, TFT_YELLOW);
+    } else {
+        fb.setTextColor(TFT_LIGHTGREY);
+        fb.drawString("Hold START/BOOT or tap MENU to exit", SCREEN_WIDTH / 2, 123);
+    }
 
     // Rhythm touch pads (DON / KA)
     draw_key_box(fb, RECT_DON.x, RECT_DON.y, RECT_DON.w, RECT_DON.h,
@@ -155,9 +199,8 @@ void HwTestGame::draw(lgfx::LGFX_Sprite& fb) {
     char bright_lbl[24];
     snprintf(bright_lbl, sizeof(bright_lbl), "BL: %u%%", BRIGHTNESS_LEVELS[_brightness_idx]);
     draw_key_box(fb, RECT_BRIGHT.x, RECT_BRIGHT.y, RECT_BRIGHT.w, RECT_BRIGHT.h, bright_lbl, false, TFT_WHITE);
-    draw_key_box(fb, RECT_MODE.x, RECT_MODE.y, RECT_MODE.w, RECT_MODE.h, mode_label(input_get_mode()), false, TFT_WHITE);
+    draw_key_box(fb, RECT_REPAIR.x, RECT_REPAIR.y, RECT_REPAIR.w, RECT_REPAIR.h, "BT RE-PAIR", false, TFT_WHITE);
 
-    // Touch crosshair / ripple
     if (_ripple_ms > 0 && _last_tx >= 0 && _last_ty >= 0) {
         const int r = static_cast<int>((220 - _ripple_ms) / 10) + 4;
         fb.drawCircle(_last_tx, _last_ty, r, TFT_YELLOW);

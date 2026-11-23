@@ -3,20 +3,25 @@
 #include <stdint.h>
 
 enum class InputMode : uint8_t {
-    LR_AB,      // LEFT, RIGHT, A (pin 14), B (pin 21)
-    DPAD_4WAY,  // LEFT, RIGHT, UP (pin 14), DOWN (pin 21)
-    BOTH,       // Sets both A/UP and B/DOWN simultaneously (for diagnostics)
+    LR_AB,
+    DPAD_4WAY,
+    BOTH,
 };
 
 enum ButtonMask : uint16_t {
-    BTN_NONE  = 0,
-    BTN_LEFT  = 1 << 0,
-    BTN_RIGHT = 1 << 1,
-    BTN_UP    = 1 << 2,
-    BTN_DOWN  = 1 << 3,
-    BTN_A     = 1 << 4,
-    BTN_B     = 1 << 5,
-    BTN_PAUSE = 1 << 6,
+    BTN_NONE   = 0,
+    BTN_LEFT   = 1 << 0,
+    BTN_RIGHT  = 1 << 1,
+    BTN_UP     = 1 << 2,
+    BTN_DOWN   = 1 << 3,
+    BTN_A      = 1 << 4,
+    BTN_B      = 1 << 5,
+    BTN_PAUSE  = 1 << 6,
+    BTN_X      = 1 << 7,
+    BTN_Y      = 1 << 8,
+    BTN_L      = 1 << 9,
+    BTN_R      = 1 << 10,
+    BTN_SELECT = 1 << 11,
 };
 
 struct TouchState {
@@ -35,18 +40,18 @@ struct InputState {
 };
 
 /**
- * @brief Configure tactile switch GPIOs with internal pull-ups.
+ * @brief Configure onboard BOOT button GPIO and initialize BLE HID Host input.
  */
 void input_init();
 
 /**
- * @brief Select how parallel-wired UP/A and DOWN/B pins map to logical buttons.
+ * @brief Retained for interface compatibility; BLE HID provides independent D-pad and face keys.
  */
 void input_set_mode(InputMode mode);
 
 InputMode input_get_mode();
 
 /**
- * @brief Poll physical buttons (with debounce) and touch state once per frame.
+ * @brief Poll BLE HID keyboard state, onboard BOOT button, and capacitive touch once per frame.
  */
 InputState input_poll();

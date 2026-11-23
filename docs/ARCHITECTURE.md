@@ -3,7 +3,7 @@
 ## 1. 基本方針
 
 - **純粋な ESP-IDF v5.x + LovyanGFX** 構成を採用し、FreeRTOSタスクとDMAを直接制御することで低遅延・高フレームレート（目標60fps）と音ゲー同期精度を確保します。
-- Wi-Fi / Bluetooth はデフォルトで起動せず、消費電力と割り込みジッタを抑えます。
+- Wi-Fi はデフォルトで起動せず、入力用に **BLE HID Host（Bluedroid BLE専用・Classic BT メモリ解放）** を起動して **8BitDo Micro（Kモード）** と接続します。
 - 将来的に「マリオ風横スクロールアクション」「太鼓・リズム天国風音ゲー」などのオリジナルゲームを簡単に追加できるよう、**HAL（ハードウェア抽象化）** と **ゲームアプリ共通インターフェース（`GameApp`）** を分離します。
 
 ---
@@ -15,14 +15,15 @@
 |  main.cpp (ランチャー / 60fps 固定タイムステップループ)          |
 +---------------------------------------------------------------+
 |  game/GameApp インターフェース                                  |
-|   ├── hw_test_game  (ハード動作確認・タッチ/音/ボタンテスト)     |
-|   ├── (今後追加) action_game (横スクロールアクション)            |
-|   └── (今後追加) rhythm_game (太鼓・リズム天国風音ゲー)          |
+|   ├── launcher_game (ホームランチャー・音量/輝度設定)              |
+|   ├── action_game   (HOPPY STAR: 横スクロールアクション3ステージ)  |
+|   ├── rhythm_game   (TAIKO BEAT!: 太鼓・リズム天国風音ゲー3曲)     |
+|   └── hw_test_game  (ハード動作確認・タッチ/音/ボタンテスト)     |
 +-------------------------------+-------------------------------+
-|  hal/display (LovyanGFX)      |  hal/input                    |
-|   - ILI9341V 320x240 (横画面) |   - 4 GPIO + BOOT デバウンス   |
-|   - 8MB PSRAM オフスクリーン   |   - 操作モード切替              |
-|     スプライト + DMA転送       |     (LR_AB / DPAD_4WAY)        |
+|  hal/display (LovyanGFX)      |  hal/input + hal/ble_hid      |
+|   - ILI9341V 320x240 (横画面) |   - BLE HID Host (8BitDo K)   |
+|   - 8MB PSRAM オフスクリーン   |   - USB HID usageデコード      |
+|     スプライト + DMA転送       |   - BOOT (GPIO0) デバウンス    |
 |   - FT6336G タッチ取得         |   - タッチ座標統合              |
 +-------------------------------+-------------------------------+
 |  hal/audio (ES8311 + I2S0 STD TX + 専用FreeRTOSタスク)         |
@@ -45,8 +46,8 @@
 `FT6336G（タッチ：0x38）` と `ES8311（オーディオ：0x18）` は同じ **`I2C_NUM_0`（SDA=16, SCL=15）** を共有しています。  
 ESP-IDF v5.x でのI2Cドライバ競合を避けるため、起動順とドライバ管理を以下のように固定します。
 
-1. `display_init()` を最初に呼び、`LovyanGFX` に `I2C_NUM_0`（レガシーI2C互換ドライバ）を初期化させる。
-2. `audio_init()` では `i2c_driver_install()` を重ねて呼ばず、まず **I2S0（MCLK含む）を起動** してから、`espressif/es8311`（v1.x）で同じ `I2C_NUM_0` 上の `0x18` を設定する（※ES8311は初期化時にMCLK入力が必須）。
+1. `display_init()` を最初に呼び、`driver/i2c_master.h`（新 I2C マスタードライバ `driver_ng`）で `I2C_NUM_0` を初期化した上で `LovyanGFX` に共有させる。
+2. `audio_init()` では同じ `I2C_NUM_0`（`display_get_i2c_bus()`）上に ES8311（`0x18`）を `i2c_master_bus_add_device()` で登録し、まず **I2S0（MCLK含む）を起動** してから ES8311 のレジスタ設定を行う（※ES8311は初期化時にMCLK入力が必須）。
 3. 最後に `AMP_EN (GPIO 1)` を `LOW` にしてFM8002Eスピーカーアンプを有効化する。
 4. ランタイム中にオーディオ音量等でI2Cへアクセスする場合は、メインループのタッチ読み取りと競合しないようミューテックスで保護する（またはゲームループ内から呼ぶ）。
 
@@ -55,11 +56,13 @@ ESP-IDF v5.x でのI2Cドライバ競合を避けるため、起動順とドラ�
 - **解決策**：`hal/audio` 内で **「I2Sドライバへ正常に書き込み完了した累計フレーム（サンプル）数」** をカウントし、`audio_get_playback_ms()` として公開します。音ゲーの譜面進行・判定はこの再生時間基準で計算します。
 - **専用タスク**：オーディオ出力は高優先度のFreeRTOSタスクで短いDMAバッファ（例：256〜512サンプル＝8〜16ms単位）を回すことで、描画負荷で音が途切れたり効果音が遅れたりするのを防ぎます。
 
-### ④ 入力抽象化（4ピン6ボタン対応）
-`hal/input` は生の4ピン（`LEFT`, `RIGHT`, `A_UP`, `B_DOWN`）＋ `BOOT` ＋ `Touch` をデバウンス（例：15ms）付きで読み取り、`InputMode` に応じて意味付けします。
+### ④ 入力抽象化（BLE HID: 8BitDo Micro Kモード）
+`hal/ble_hid` が Bluedroid BLE HID Host として 8BitDo Micro（Kモード＝BLE キーボード）を自動スキャン・ペアリング・再接続し、受信した USB HID Keyboard Usage ID を `hal/input` の論理ボタン（`BTN_LEFT/RIGHT/UP/DOWN/A/B/X/Y/L/R/PAUSE/SELECT`）にマッピングします。
 
-- `InputMode::LR_AB`（横スクロール・音ゲー向け）：`left`, `right`, `a`, `b`, `pause`
-- `InputMode::DPAD_4WAY`（メニュー・4方向ゲーム向け）：`left`, `right`, `up`, `down`, `pause`（決定はタッチまたは専用キー）
+- D-Pad: 矢印キー（`0x4F..0x52`）および 8BitDo Kモード既定の `c/d/e/f`（`0x06..0x09`）に対応
+- A/X/Y/B: `g/h/i/j`（`0x0A..0x0D`）および `Enter/Space/Z/X` に対応
+- L/R: `k/l/q/r`（`L`）および `m/p/s`（`R`）に対応
+- Start/Select: `o`（`PAUSE`）/ `n`（`SELECT`）/ `Esc` および本体 `BOOT` ボタン（`GPIO 0`）に対応
 
 ---
 

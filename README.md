@@ -3,7 +3,7 @@
 **ES3C28P（ESP32-S3 / 8MB PSRAM / 2.8インチIPS液晶＋静電容量タッチ）** をベースにした、子ども向けのオリジナル携帯ゲームコンソールプロジェクトです。
 
 - **ターゲットジャンル**：横スクロールアクション（マリオ風）／リズムゲーム（太鼓・リズム天国風）
-- **ハードウェア特徴**：オンボードの液晶・タッチ・オーディオコーデック（ES8311）・スピーカーアンプ（FM8002E）・LiPo充電回路（TP4054）を最大限に活かし、**外付け部品は最小限（タクトスイッチ×6・8Ω 1Wスピーカー・LiPoバッテリー）** で構成します。
+- **ハードウェア特徴**：オンボードの液晶・タッチ・オーディオコーデック（ES8311）・スピーカーアンプ（FM8002E）・LiPo充電回路（TP4054）を最大限に活かし、入力コントローラには **8BitDo Micro（Kモード / BLE HID キーボード）** を利用します（外付け部品は 8Ω 1W スピーカー・LiPo バッテリーのみ）。
 - **開発フレームワーク**：ESP-IDF v5.x + LovyanGFX + `espressif/es8311`
 
 ---
@@ -33,11 +33,16 @@ esp_gconsole/
     ├── main.cpp           # 初期化・60fpsメインループ
     ├── hal/
     │   ├── display.hpp/.cpp  # LovyanGFX (ILI9341V 320x240 + FT6336Gタッチ)
-    │   ├── input.hpp/.cpp    # 4ピン6ボタンデバウンス・操作モード抽象化
-    │   └── audio.hpp/.cpp    # ES8311 + I2S DMAミキサ（トーン・サンプル基準時計）
+    │   ├── ble_hid.hpp/.cpp  # Bluedroid BLE HID Host (8BitDo Micro Kモード対応)
+    │   ├── input.hpp/.cpp    # BLE HID入力 + BOOTボタン + タッチ統合
+    │   ├── audio.hpp/.cpp    # ES8311 + I2S DMAミキサ（波形合成・BGMシーケンサ・基準時計）
+    │   └── save_data.hpp/.cpp # NVS設定・ハイスコア永続化
     └── game/
         ├── game_app.hpp      # ゲーム共通インターフェース
-        └── hw_test_game.hpp/.cpp # ハード動作確認用テストアプリ
+        ├── launcher_game.hpp/.cpp # ホームランチャー・音量/輝度設定
+        ├── action_game.hpp/.cpp   # 横スクロールアクション（HOPPY STAR / 全3ステージ）
+        ├── rhythm_game.hpp/.cpp   # 太鼓・リズム天国風音ゲー（TAIKO BEAT! / 3曲×2難易度）
+        └── hw_test_game.hpp/.cpp  # ハード動作確認用テストアプリ
 ```
 
 ---

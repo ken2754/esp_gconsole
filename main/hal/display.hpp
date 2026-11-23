@@ -2,14 +2,20 @@
 
 #define LGFX_USE_V1
 #include <LovyanGFX.hpp>
+#include <driver/i2c_master.h>
 #include <stdint.h>
 
 /**
  * @brief Initialize ES3C28P ILI9341V display, FT6336G touch, and PSRAM framebuffer.
- *        Also initializes I2C_NUM_0 for shared peripherals (Touch & ES8311).
+ *        Installs I2C_NUM_0 via driver/i2c_master.h for shared peripherals (Touch & ES8311).
  * @return true on success.
  */
 bool display_init();
+
+/**
+ * @brief Returns the shared I2C master bus handle (I2C_NUM_0) initialized by display_init().
+ */
+i2c_master_bus_handle_t display_get_i2c_bus();
 
 /**
  * @brief Returns the 320x240 RGB565 offscreen framebuffer allocated in PSRAM.

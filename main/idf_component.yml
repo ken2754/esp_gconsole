@@ -3,4 +3,3 @@ dependencies:
     version: ">=5.0.0"
   LovyanGFX:
     git: https://github.com/lovyan03/LovyanGFX.git
-  espressif/es8311: "^1.0.0"

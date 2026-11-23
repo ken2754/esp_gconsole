@@ -15,6 +15,8 @@ public:
     void init() override;
     void update(uint32_t dt_ms, const InputState& input) override;
     void draw(lgfx::LGFX_Sprite& fb) override;
+    void on_exit() override;
+    bool wants_exit() const override { return _wants_exit; }
 
 private:
     uint8_t  _brightness_idx = 1; // 30%, 70%, 100%
@@ -27,4 +29,6 @@ private:
     uint32_t _don_flash_ms   = 0;
     uint32_t _ka_flash_ms    = 0;
     uint16_t _last_held      = 0;
+    uint32_t _boot_hold_ms   = 0;
+    bool     _wants_exit     = false;
 };
